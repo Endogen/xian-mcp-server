@@ -1,0 +1,15 @@
+{
+    "mcpServers":
+    {
+        "xian":
+        {
+            "command": "docker",
+            "args": [
+                "run",
+                "-i",
+                "--rm",
+                "xian-mcp-server"
+            ]
+        }
+    }
+}

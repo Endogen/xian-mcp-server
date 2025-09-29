@@ -1,0 +1,8 @@
+version: '3.8'
+services:
+  xian-mcp:
+    build: .
+    image: xian-mcp-server:latest
+    environment:
+      - XIAN_NODE_URL=https://node.xian.org
+      - XIAN_CHAIN_ID=xian-1
