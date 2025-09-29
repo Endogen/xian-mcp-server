@@ -31,11 +31,17 @@ cd xian-mcp-server
 
 ### 2. Build the Docker Container
 
+#### Option A: Using Docker Compose (Recommended)
+```bash
+docker-compose build
+```
+
+#### Option B: Using Docker directly
 ```bash
 docker build -t xian-mcp-server .
 ```
 
-Or using the install script:
+#### Option C: Using the install script
 ```bash
 chmod +x install.sh
 ./install.sh
@@ -43,7 +49,12 @@ chmod +x install.sh
 
 ### 3. Test the Container
 
-Verify the build was successful:
+#### Using Docker Compose:
+```bash
+echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | docker-compose run --rm xian-mcp
+```
+
+#### Using Docker directly:
 ```bash
 echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | docker run --rm -i xian-mcp-server
 ```
@@ -169,7 +180,22 @@ The server supports these environment variables:
 - `XIAN_NODE_URL`: XIAN node URL (default: `https://node.xian.org`)
 - `XIAN_CHAIN_ID`: XIAN chain ID (default: `xian-1`)
 
-To use custom values:
+#### Using Docker Compose with custom values
+
+Create a `.env` file in the project directory:
+```env
+XIAN_NODE_URL=https://testnet.xian.org
+XIAN_CHAIN_ID=testnet-1
+```
+
+Then run:
+```bash
+docker-compose up
+```
+
+#### Using Docker directly
+
+To use custom values with Docker:
 
 ```json
 {
