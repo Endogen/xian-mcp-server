@@ -306,12 +306,24 @@ pip install -r requirements.txt
 python xian_server.py
 ```
 
-### Running tests
+## Running tests
 
+### Quick test (using included test file)
 ```bash
-# Test the MCP protocol implementation
-echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | python xian_server.py
+# The repo includes a test file with the proper MCP handshake
+python xian_server.py < test_requests.jsonl
 ```
+
+This test validates that:
+- ✅ The MCP server starts correctly and accepts stdio communication
+- ✅ The MCP protocol handshake completes successfully (initialize → initialized → tools/list)
+- ✅ All Python dependencies are properly installed
+- ✅ The server can serialize and respond with valid JSON-RPC 2.0 messages
+- ✅ All Xian blockchain tools are registered and available
+
+You should see two JSON responses:
+1. Initialize response (id:1)
+2. Tools list response (id:2)
 
 ## Resources
 
