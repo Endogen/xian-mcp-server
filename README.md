@@ -65,6 +65,35 @@ You should see two JSON responses:
 1. Initialize response (id:1)
 2. Tools list response (id:2)
 
+#### Implementation Tests
+To test the actual Xian blockchain functionality (wallets, transactions, cryptography), run the comprehensive test suite:
+```bash
+# Install test dependencies
+pip install pytest pytest-asyncio
+
+# Run the tests
+python test_xian_server.py
+```
+
+#### Before running the tests:
+1. Open test_xian_server.py and configure the test values at the top of the file
+2. Update the values with real testnet data (addresses, private keys, etc.)
+3. The tests use testnet by default (https://testnet.xian.org)
+
+#### What the tests cover:
+- ✅ Wallet creation and import)
+- ✅ Balance and state queries
+- ✅ Transaction simulation and retrieval
+- ✅ Cryptographic operations - signing, encryption
+- ✅ Error handling for invalid inputs
+
+#### Expected output:
+- Tests will show ✅ for passed tests
+- Tests requiring configuration will be skipped with helpful messages
+- Failed tests will show detailed error information
+
+Run these tests before building the Docker container to ensure all functionality works correctly with your network configuration.
+
 ## Installation Guide
 
 ### For Claude Desktop
@@ -144,7 +173,7 @@ If you're using Docker MCP Toolkit, you can add XIAN to your custom catalog:
 
 1. Copy the example catalog:
 ```bash
-cp config/custom_catalog.yaml ~/.docker/mcp/catalogs/custom.yaml
+cp custom_catalog.yaml ~/.docker/mcp/catalogs/custom.yaml
 ```
 
 2. Update your Claude Desktop config to use both catalogs:
@@ -186,10 +215,10 @@ The server supports these environment variables:
 
 #### Using Docker Compose with custom values
 
-Create a `.env` file in the project directory:
+Create a `.env` file in the project directory (or copy and rename `.env.example`):
 ```env
-XIAN_NODE_URL=https://testnet.xian.org
-XIAN_CHAIN_ID=testnet-1
+XIAN_NODE_URL=https://node.xian.org
+XIAN_CHAIN_ID=xian-1
 ```
 
 Then run:
