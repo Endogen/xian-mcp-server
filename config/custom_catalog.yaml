@@ -18,14 +18,16 @@ registry:
       - name: create_wallet
       - name: create_wallet_from_private_key
       - name: create_hd_wallet
+      - name: create_hd_wallet_from_mnemonic
       - name: get_balance
       - name: send_transaction
       - name: send_tokens
-      - name: submit_contract
+      - name: get_transaction
       - name: get_state
       - name: get_contract
       - name: simulate_transaction
       - name: sign_message
+      - name: verify_signature
       - name: encrypt_message
       - name: decrypt_message
     secrets:
@@ -43,5 +45,6 @@ registry:
         - xian
         - wallet
         - smart-contracts
+        - python
       license: MIT
       owner: local
