@@ -41,25 +41,29 @@ docker-compose build
 docker build -t xian-mcp-server .
 ```
 
-#### Option C: Using the install script
+### 3. Testing
+The repo includes a test file with the proper MCP handshake that can be used to test
+
+#### Direct test
 ```bash
-chmod +x install.sh
-./install.sh
+python xian_server.py < test_requests.jsonl
 ```
 
-### 3. Test the Container
-
-#### Using Docker Compose:
+#### Docker test
 ```bash
-echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | docker-compose run --rm xian-mcp
+docker run --rm -i xian-mcp-server < test_requests.jsonl
 ```
 
-#### Using Docker directly:
-```bash
-echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | docker run --rm -i xian-mcp-server
-```
+This test validates that:
+- ✅ The MCP server starts correctly and accepts stdio communication
+- ✅ The MCP protocol handshake completes successfully (initialize → initialized → tools/list)
+- ✅ All Python dependencies are properly installed
+- ✅ The server can serialize and respond with valid JSON-RPC 2.0 messages
+- ✅ All Xian blockchain tools are registered and available
 
-You should see a JSON response listing all available tools.
+You should see two JSON responses:
+1. Initialize response (id:1)
+2. Tools list response (id:2)
 
 ## Installation Guide
 
@@ -234,24 +238,6 @@ Once installed, you can interact with the XIAN blockchain through your AI assist
 - "Sign the message 'Hello XIAN' with private key [key]"
 - "Encrypt a message from [sender_key] to [recipient_public_key]"
 
-## Security Considerations
-
-⚠️ **CRITICAL SECURITY INFORMATION**:
-
-1. **This server is for LOCAL USE ONLY** - Never expose it to the internet
-2. **Use test wallets only** - Never use production wallets for testing
-3. **Private keys are handled in memory** - They are never stored or logged
-4. **Each tool requires explicit approval** - Both Claude and LM Studio will ask for confirmation before executing tools
-5. **Run in Docker** - The server runs in an isolated container for security
-
-### Best Practices
-
-- Generate new test wallets for experimentation
-- Use testnet nodes when available
-- Never commit private keys to version control
-- Review all transaction parameters before approval
-- Keep the Docker image updated
-
 ## Available Tools
 
 | Tool | Description | Requires Private Key |
@@ -306,29 +292,10 @@ pip install -r requirements.txt
 python xian_server.py
 ```
 
-## Running tests
-
-### Quick test (using included test file)
-```bash
-# The repo includes a test file with the proper MCP handshake
-python xian_server.py < test_requests.jsonl
-```
-
-This test validates that:
-- ✅ The MCP server starts correctly and accepts stdio communication
-- ✅ The MCP protocol handshake completes successfully (initialize → initialized → tools/list)
-- ✅ All Python dependencies are properly installed
-- ✅ The server can serialize and respond with valid JSON-RPC 2.0 messages
-- ✅ All Xian blockchain tools are registered and available
-
-You should see two JSON responses:
-1. Initialize response (id:1)
-2. Tools list response (id:2)
-
 ## Resources
 
 - [XIAN Network Documentation](https://docs.xian.org)
 - [xian-py SDK](https://github.com/xian-network/xian-py)
-- [Model Context Protocol](https://modelcontextprotocol.io/)
+- [Model Context Protocol](https://modelcontextprotocol.io)
 - [Claude Desktop MCP Guide](https://docs.anthropic.com/en/docs/mcp)
 - [LM Studio MCP Documentation](https://lmstudio.ai/docs/app/plugins/mcp)
