@@ -7,12 +7,11 @@ import os
 import sys
 import json
 import logging
-from typing import Any, Coroutine
 
 from xian_py import XianAsync, Wallet
 from xian_py.wallet import HDWallet, verify_msg
 from xian_py.transaction import simulate_tx_async
-from xian_py.crypto import encrypt, decrypt_as_sender, decrypt_as_receiver
+from xian_py.crypto import encrypt, decrypt_as_receiver
 from mcp.server.fastmcp import FastMCP
 
 # Configure logging to stderr
