@@ -8,6 +8,7 @@ import sys
 import json
 import logging
 
+from typing import Any
 from xian_py import XianAsync, Wallet
 from xian_py.wallet import HDWallet, verify_msg
 from xian_py.transaction import simulate_tx_async
@@ -233,7 +234,7 @@ async def get_transaction(tx_hash: str = "") -> dict[str, str] | str:
 
 
 @mcp.tool()
-async def get_state(state_key: str) -> dict[str, str] | str:
+async def get_state(state_key: str) -> dict[str, Any] | str:
     """Get state from a contract variable."""
 
     if not state_key.strip():
