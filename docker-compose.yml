@@ -4,7 +4,8 @@ services:
     build: .
     image: xian-mcp-server:latest
     environment:
-      - XIAN_NODE_URL=${XIAN_NODE_URL:-https://node.xian.org}
       - XIAN_CHAIN_ID=${XIAN_CHAIN_ID:-xian-1}
+      - XIAN_NODE_URL=${XIAN_NODE_URL:-https://node.xian.org}
+      - XIAN_GRAPHQL=${XIAN_GRAPHQL:-https://node.xian.org/graphql}
     stdin_open: true
     tty: true

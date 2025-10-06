@@ -31,6 +31,9 @@ registry:
       - name: encrypt_message
       - name: decrypt_message
     secrets:
+      - name: XIAN_GRAPHQL
+        env: XIAN_GRAPHQL
+        example: "https://node.xian.org/graphql"
       - name: XIAN_NODE_URL
         env: XIAN_NODE_URL
         example: "https://node.xian.org"

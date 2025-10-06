@@ -6,6 +6,7 @@ XIAN Network MCP Server - Interface with XIAN blockchain for wallet management a
 import os
 import sys
 import json
+import aiohttp
 import logging
 
 from typing import Any
@@ -14,6 +15,7 @@ from xian_py.wallet import HDWallet, verify_msg
 from xian_py.transaction import simulate_tx_async
 from xian_py.crypto import encrypt, decrypt_as_receiver
 from mcp.server.fastmcp import FastMCP
+from collections import defaultdict
 
 # Configure logging to stderr
 logging.basicConfig(
@@ -27,8 +29,9 @@ logger = logging.getLogger("xian-server")
 mcp = FastMCP("xian")
 
 # Configuration
-NODE_URL = os.environ.get("XIAN_NODE_URL", "https://node.xian.org")
 CHAIN_ID = os.environ.get("XIAN_CHAIN_ID", "xian-1")
+NODE_URL = os.environ.get("XIAN_NODE_URL", "https://node.xian.org")
+GRAPHQL = os.environ.get("XIAN_GRAPHQL", "https://node.xian.org/graphql")
 
 # TODO: Add function to retrieve token contract from token name
 # TODO: Maybe I should switch from 'address' to 'public_key'?
@@ -438,12 +441,307 @@ async def decrypt_message(
         return f"❌ Error decrypting message: {str(ex)}"
 
 
+@mcp.tool()
+async def get_token_contract_by_symbol(token_symbol: str = "") -> dict | str:
+    """Get token contract by symbol."""
+
+    if not token_symbol.strip():
+        return "❌ Error: Token symbol is required"
+
+    try:
+        tokens = await get_tokens()
+
+        # Group contracts by symbol
+        symbols = defaultdict(list)
+        for tkn in tokens:
+            symbols[tkn['symbol']].append(tkn['contract'])
+
+        contracts = symbols.get(token_symbol.strip().upper(), [])
+
+        if not contracts:
+            return {
+                "token_contracts": [],
+                "count": 0,
+                "message": "No token found with this symbol"
+            }
+        elif len(contracts) == 1:
+            return {
+                "token_contracts": contracts,
+                "count": 1
+            }
+        else:
+            return {
+                "token_contracts": contracts,
+                "count": len(contracts),
+                "message": "Multiple tokens found with this symbol"
+            }
+    except Exception as ex:
+        logger.error(f"Error getting token contract: {ex}")
+        return f"❌ Error getting token contract: {str(ex)}"
+
+
+@mcp.tool()
+async def get_token_data_by_contract(token_contract: str = "") -> dict | str:
+    """Get token data by contract."""
+
+    if not token_contract.strip():
+        return "❌ Error: Token contract is required"
+
+    contract = token_contract.strip()
+
+    query = """
+    query GetTokenDetails(
+      $operator: String!, 
+      $logoUrl: String!, 
+      $name: String!, 
+      $symbol: String!, 
+      $website: String!) {
+      tokenStates: allStates(
+        filter: {
+          or: [
+            { key: { equalTo: $operator } },
+            { key: { equalTo: $logoUrl } },
+            { key: { equalTo: $name } },
+            { key: { equalTo: $symbol } },
+            { key: { equalTo: $website } }
+          ]
+        }
+      ) {
+        nodes {
+          key
+          value
+          updated
+        }
+      }
+    }
+    """
+
+    try:
+        data = await fetch_graphql(
+            query=query,
+            variables={
+                "operator": f"{contract}.metadata:operator",
+                "logoUrl": f"{contract}.metadata:token_logo_url",
+                "name": f"{contract}.metadata:token_name",
+                "symbol": f"{contract}.metadata:token_symbol",
+                "website": f"{contract}.metadata:token_website"
+            }
+        )
+        return data
+
+    except Exception as ex:
+        logger.error(f"Error getting token data: {ex}")
+        return f"❌ Error getting token data: {str(ex)}"
+
+
+# TODO: Rework
+@mcp.tool()
+async def buy_on_dex(token_contract: str = "") -> dict | str:
+    """Get DEX price for a token."""
+
+    if not token_contract.strip():
+        return "❌ Error: Token contract is required"
+
+    query = """
+    query GetTokenPrice($contract: String!) {
+        token(contract: $contract) {
+            price
+            liquidity
+            volume24h
+        }
+    }
+    """
+
+    try:
+        data = await fetch_graphql(
+            query=query,
+            variables={"contract": token_contract}
+        )
+        return data
+    except Exception as ex:
+        logger.error(f"Error getting DEX price: {ex}")
+        return f"❌ Error getting DEX price: {str(ex)}"
+
+
+# TODO: Rework
+@mcp.tool()
+async def sell_on_dex(token_contract: str = "") -> dict | str:
+    """Get DEX price for a token."""
+
+    if not token_contract.strip():
+        return "❌ Error: Token contract is required"
+
+    query = """
+    query GetTokenPrice($contract: String!) {
+        token(contract: $contract) {
+            price
+            liquidity
+            volume24h
+        }
+    }
+    """
+
+    try:
+        data = await fetch_graphql(
+            query=query,
+            variables={"contract": token_contract}
+        )
+        return data
+    except Exception as ex:
+        logger.error(f"Error getting DEX price: {ex}")
+        return f"❌ Error getting DEX price: {str(ex)}"
+
+
+# TODO: Rework
+@mcp.tool()
+async def get_dex_price(token_contract: str = "") -> dict | str:
+    """Get DEX price for a token."""
+
+    if not token_contract.strip():
+        return "❌ Error: Token contract is required"
+
+    query = """
+    query GetTokenPrice($contract: String!) {
+        token(contract: $contract) {
+            price
+            liquidity
+            volume24h
+        }
+    }
+    """
+
+    try:
+        data = await fetch_graphql(
+            query=query,
+            variables={"contract": token_contract}
+        )
+        return data
+    except Exception as ex:
+        logger.error(f"Error getting DEX price: {ex}")
+        return f"❌ Error getting DEX price: {str(ex)}"
+
+
+# === HELPER FUNCTIONS ===
+
+async def get_tokens() -> list[dict]:
+    """Get all tokens with their contract name and symbol."""
+
+    query = """
+    query GetTokenContractsWithSymbols {
+      tokenSymbols: allStates(
+        filter: {
+          key: { endsWith: ".metadata:token_symbol" }
+        }
+        orderBy: KEY_ASC
+      ) {
+        nodes {
+          key
+          value
+        }
+      }
+      tokenContracts: allContracts(
+        condition: { xsc0001: true }
+      ) {
+        nodes {
+          name
+        }
+      }
+    }
+    """
+
+    try:
+        data = await fetch_graphql(query=query)
+
+        # Get set of valid contract names
+        valid_contracts = {
+            node['name']
+            for node in data['data']['tokenContracts']['nodes']
+        }
+
+        # Parse and filter tokens
+        tokens = []
+        for node in data['data']['tokenSymbols']['nodes']:
+            contract = node['key'].split('.metadata:token_symbol')[0]
+            if contract in valid_contracts:
+                tokens.append({
+                    'token_contract': contract.lower(),
+                    'token_symbol': node['value'].upper()
+                })
+
+        return tokens
+
+    except Exception as ex:
+        logger.error(f"Error getting tokens: {ex}")
+        raise
+
+
+async def fetch_graphql(
+        query: str,
+        variables: dict = None,
+        endpoint: str = None,
+        headers: dict = None,
+        timeout: float = 5.0) -> dict:
+    """
+    Execute a GraphQL query and return the results.
+
+    Args:
+        query: The GraphQL query string
+        variables: Optional variables for the query
+        endpoint: GraphQL endpoint URL (defaults to configured endpoint)
+        headers: Optional additional headers
+        timeout: Request timeout in seconds
+
+    Returns:
+        Dict containing the GraphQL response data
+
+    Raises:
+        Exception: When the query fails
+    """
+
+    variables = variables or {}
+    endpoint = endpoint or GRAPHQL
+
+    default_headers = {'Content-Type': 'application/json'}
+    if headers:
+        default_headers.update(headers)
+
+    payload = {
+        'query': query,
+        'variables': variables
+    }
+
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(
+                    endpoint,
+                    json=payload,
+                    headers=default_headers,
+                    timeout=aiohttp.ClientTimeout(total=timeout)
+            ) as response:
+                response.raise_for_status()
+                result = await response.json()
+
+                if 'errors' in result:
+                    error_msg = ', '.join(ex.get('message', str(e)) for ex in result['errors'])
+                    raise Exception(f"GraphQL errors: {error_msg}")
+
+                return result.get('data', {})
+
+        except aiohttp.ClientError as ex:
+            logger.error(f"HTTP error fetching GraphQL: {ex}")
+            raise Exception(f"Failed to fetch GraphQL: {str(ex)}")
+        except Exception as ex:
+            logger.error(f"Error fetching GraphQL: {ex}")
+            raise
+
+
 # === SERVER STARTUP ===
 
 if __name__ == "__main__":
     logger.info("Starting XIAN Network MCP server...")
     logger.info(f"Node URL: {NODE_URL}")
     logger.info(f"Chain ID: {CHAIN_ID}")
+    logger.info(f"GraphQL : {GRAPHQL}")
 
     try:
         mcp.run(transport="stdio")

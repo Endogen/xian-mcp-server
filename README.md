@@ -1,4 +1,4 @@
-# XIAN MCP Server
+# Xian MCP Server
 
 A Model Context Protocol (MCP) server for interacting with the XIAN blockchain network. This server enables AI assistants to manage wallets, send transactions, deploy smart contracts, and interact with the XIAN blockchain.
 
