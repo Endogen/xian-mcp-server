@@ -36,6 +36,8 @@ GRAPHQL = os.environ.get("XIAN_GRAPHQL", "https://node.xian.org/graphql")
 # TODO: Add function to retrieve token contract from token name
 # TODO: Maybe I should switch from 'address' to 'public_key'?
 # TODO: Integrate DEX: 'What's the price of X on the DEX?'
+# TODO: Update CLAUDE.md & README.md & test_xian_server.py
+# TODO: Add docstrings
 
 # === MCP TOOLS ===
 
@@ -534,88 +536,132 @@ async def get_token_data_by_contract(token_contract: str = "") -> dict | str:
         return f"❌ Error getting token data: {str(ex)}"
 
 
-# TODO: Rework
 @mcp.tool()
-async def buy_on_dex(token_contract: str = "") -> dict | str:
-    """Get DEX price for a token."""
+async def buy_on_dex(
+        private_key: str = "",
+        buy_token: str = "",
+        sell_token: str = "",
+        amount: float = 0,
+        slippage: float = 1.0,
+        deadline_min: float = 1.0) -> dict | str:
+    """Buy tokens on the DEX."""
 
-    if not token_contract.strip():
-        return "❌ Error: Token contract is required"
+    if not private_key.strip():
+        return "❌ Error: Private key is required"
+    if not buy_token.strip():
+        return "❌ Error: Buy token contract is required"
+    if not sell_token.strip():
+        return "❌ Error: Sell token contract is required"
+    if amount <= 0:
+        return "❌ Error: Amount must be positive"
 
-    query = """
-    query GetTokenPrice($contract: String!) {
-        token(contract: $contract) {
-            price
-            liquidity
-            volume24h
-        }
-    }
-    """
+    logger.info(f"Buying {amount} {buy_token} with {sell_token}")
 
     try:
-        data = await fetch_graphql(
-            query=query,
-            variables={"contract": token_contract}
+        return await send_transaction(
+            private_key=private_key,
+            contract="con_helper_dex",
+            function="buy",
+            kwargs={
+                "buy_token": buy_token.strip(),
+                "sell_token": sell_token.strip(),
+                "amount": amount,
+                "slippage": slippage,
+                "deadline_min": deadline_min
+            }
         )
-        return data
     except Exception as ex:
-        logger.error(f"Error getting DEX price: {ex}")
-        return f"❌ Error getting DEX price: {str(ex)}"
+        logger.error(f"Error buying on DEX: {ex}")
+        return f"❌ Error buying on DEX: {str(ex)}"
 
 
-# TODO: Rework
 @mcp.tool()
-async def sell_on_dex(token_contract: str = "") -> dict | str:
-    """Get DEX price for a token."""
+async def sell_on_dex(
+        private_key: str = "",
+        sell_token: str = "",
+        buy_token: str = "",
+        amount: float = 0,
+        slippage: float = 1.0,
+        deadline_min: float = 1.0) -> dict | str:
+    """Sell tokens on the DEX."""
 
-    if not token_contract.strip():
-        return "❌ Error: Token contract is required"
+    if not private_key.strip():
+        return "❌ Error: Private key is required"
+    if not sell_token.strip():
+        return "❌ Error: Sell token contract is required"
+    if not buy_token.strip():
+        return "❌ Error: Buy token contract is required"
+    if amount <= 0:
+        return "❌ Error: Amount must be positive"
 
-    query = """
-    query GetTokenPrice($contract: String!) {
-        token(contract: $contract) {
-            price
-            liquidity
-            volume24h
-        }
-    }
-    """
+    logger.info(f"Selling {amount} {sell_token} for {buy_token}")
 
     try:
-        data = await fetch_graphql(
-            query=query,
-            variables={"contract": token_contract}
+        return await send_transaction(
+            private_key=private_key,
+            contract="con_helper_dex",
+            function="sell",
+            kwargs={
+                "sell_token": sell_token.strip(),
+                "buy_token": buy_token.strip(),
+                "amount": amount,
+                "slippage": slippage,
+                "deadline_min": deadline_min
+            }
         )
-        return data
     except Exception as ex:
-        logger.error(f"Error getting DEX price: {ex}")
-        return f"❌ Error getting DEX price: {str(ex)}"
+        logger.error(f"Error selling on DEX: {ex}")
+        return f"❌ Error selling on DEX: {str(ex)}"
 
 
-# TODO: Rework
 @mcp.tool()
-async def get_dex_price(token_contract: str = "") -> dict | str:
-    """Get DEX price for a token."""
+async def get_dex_price(token_contract: str = "", base_contract: str = "currency") -> dict | str:
+    """Get DEX price for a token against a base currency."""
 
     if not token_contract.strip():
         return "❌ Error: Token contract is required"
 
-    query = """
-    query GetTokenPrice($contract: String!) {
-        token(contract: $contract) {
-            price
-            liquidity
-            volume24h
-        }
-    }
-    """
+    token = token_contract.strip()
+    base = base_contract.strip()
+
+    # Order tokens alphabetically (DEX convention)
+    token_a, token_b = (token, base) if token < base else (base, token)
 
     try:
-        data = await fetch_graphql(
-            query=query,
-            variables={"contract": token_contract}
-        )
-        return data
+        # Get pair ID
+        pair_id = await get_state(f"con_pairs.toks_to_pair:{token_a}:{token_b}")
+
+        if pair_id.get('state_value') is None:
+            return {
+                "error": "Pair does not exist",
+                "token": token,
+                "base": base
+            }
+
+        pair = pair_id['state_value']
+
+        # Get reserves
+        reserve0 = await get_state(f"con_pairs.pairs:{pair}:reserve0")
+        reserve1 = await get_state(f"con_pairs.pairs:{pair}:reserve1")
+
+        r0 = reserve0['state_value']
+        r1 = reserve1['state_value']
+
+        # Calculate price based on token order
+        if token_a == token:
+            price = r1 / r0 if r0 > 0 else 0
+        else:
+            price = r0 / r1 if r1 > 0 else 0
+
+        return {
+            "token": token,
+            "base": base,
+            "price": price,
+            "pair_id": pair,
+            "reserve_token": r0 if token_a == token else r1,
+            "reserve_base": r1 if token_a == token else r0
+        }
+
     except Exception as ex:
         logger.error(f"Error getting DEX price: {ex}")
         return f"❌ Error getting DEX price: {str(ex)}"
@@ -739,8 +785,8 @@ async def fetch_graphql(
 
 if __name__ == "__main__":
     logger.info("Starting XIAN Network MCP server...")
-    logger.info(f"Node URL: {NODE_URL}")
     logger.info(f"Chain ID: {CHAIN_ID}")
+    logger.info(f"Node URL: {NODE_URL}")
     logger.info(f"GraphQL : {GRAPHQL}")
 
     try:
