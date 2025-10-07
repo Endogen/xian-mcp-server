@@ -33,9 +33,7 @@ CHAIN_ID = os.environ.get("XIAN_CHAIN_ID", "xian-1")
 NODE_URL = os.environ.get("XIAN_NODE_URL", "https://node.xian.org")
 GRAPHQL = os.environ.get("XIAN_GRAPHQL", "https://node.xian.org/graphql")
 
-# TODO: Add function to retrieve token contract from token name
 # TODO: Maybe I should switch from 'address' to 'public_key'?
-# TODO: Integrate DEX: 'What's the price of X on the DEX?'
 # TODO: Update CLAUDE.md & README.md & test_xian_server.py
 # TODO: Add docstrings
 
@@ -144,7 +142,7 @@ async def create_hd_wallet_from_mnemonic(mnemonic: str = "") -> dict[str, str] |
 
 
 @mcp.tool()
-async def get_balance(address: str = "", token_contract: str = "currency") -> dict[str, int | float] | str:
+async def get_balance(address: str = "", token_contract: str = "currency") -> dict[str, Any] | str:
     """Get balance for an address, optionally for a specific token contract."""
 
     if not address.strip():
@@ -224,7 +222,7 @@ async def send_tokens(
 
 
 @mcp.tool()
-async def get_transaction(tx_hash: str = "") -> dict[str, str] | str:
+async def get_transaction(tx_hash: str = "") -> dict[str, Any] | str:
     """Retrieve transaction from a transaction hash."""
 
     if not tx_hash.strip():
@@ -456,7 +454,7 @@ async def get_token_contract_by_symbol(token_symbol: str = "") -> dict | str:
         # Group contracts by symbol
         symbols = defaultdict(list)
         for tkn in tokens:
-            symbols[tkn['symbol']].append(tkn['contract'])
+            symbols[tkn['token_symbol']].append(tkn['token_contract'])
 
         contracts = symbols.get(token_symbol.strip().upper(), [])
 
@@ -560,7 +558,7 @@ async def buy_on_dex(
     try:
         return await send_transaction(
             private_key=private_key,
-            contract="con_helper_dex",
+            contract="con_dex_noob_wrapper",
             function="buy",
             kwargs={
                 "buy_token": buy_token.strip(),
@@ -585,6 +583,9 @@ async def sell_on_dex(
         deadline_min: float = 1.0) -> dict | str:
     """Sell tokens on the DEX."""
 
+    if amount != round(amount, 8):
+        amount *= 0.9999
+
     if not private_key.strip():
         return "❌ Error: Private key is required"
     if not sell_token.strip():
@@ -599,7 +600,7 @@ async def sell_on_dex(
     try:
         return await send_transaction(
             private_key=private_key,
-            contract="con_helper_dex",
+            contract="con_dex_noob_wrapper",
             function="sell",
             kwargs={
                 "sell_token": sell_token.strip(),
@@ -701,12 +702,12 @@ async def get_tokens() -> list[dict]:
         # Get set of valid contract names
         valid_contracts = {
             node['name']
-            for node in data['data']['tokenContracts']['nodes']
+            for node in data['tokenContracts']['nodes']
         }
 
         # Parse and filter tokens
         tokens = []
-        for node in data['data']['tokenSymbols']['nodes']:
+        for node in data['tokenSymbols']['nodes']:
             contract = node['key'].split('.metadata:token_symbol')[0]
             if contract in valid_contracts:
                 tokens.append({
