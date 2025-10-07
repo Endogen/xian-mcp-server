@@ -9,6 +9,7 @@ import os
 import pytest
 
 # Set testnet configuration
+os.environ["XIAN_GRAPHQL"] = "https://node.xian.org/graphql"
 os.environ["XIAN_NODE_URL"] = "https://testnet.xian.org"
 os.environ["XIAN_CHAIN_ID"] = "xian-testnet-12"
 
@@ -29,6 +30,11 @@ from xian_server import (
     verify_signature,
     encrypt_message,
     decrypt_message,
+    get_token_contract_by_symbol,
+    get_token_data_by_contract,
+    buy_on_dex,
+    sell_on_dex,
+    get_dex_price
 )
 
 # ==========================================
@@ -60,6 +66,12 @@ TEST_SENDER_PUBLIC_KEY = "c4fe8a0bf7a23d5830dde3781abbf2c64ed9f2a6bf052ca1ee48c0
 TEST_SENDER_PRIVATE_KEY = "b93ffd38047268fd0f6c56fe1f529d6f87432b0b23f4cc8cfe67bfa63b340224"
 TEST_RECEIVER_PUBLIC_KEY = "d1cb00bd98f59a72f10516adf49f1b280e4d20dffbeeaa53e63c37d940555a1c"
 TEST_RECEIVER_PRIVATE_KEY = "e77263bd53c54fc446ac620d71efb2197745d2b113be861afd18040a33e11104"
+
+# Test token and DEX values (adjust to actual testnet values)
+TEST_TOKEN_SYMBOL = "XIAN"  # Use a token symbol that exists on testnet
+TEST_TOKEN_CONTRACT = "currency"  # Use a valid token contract
+TEST_DEX_TOKEN = "con_test_token"  # Use a token that has a DEX pair on testnet
+TEST_DEX_BASE = "currency"  # Base currency for DEX trades
 
 
 # ==========================================
@@ -366,6 +378,165 @@ class TestCryptography:
         print(f"✅ Correctly rejected encryption with missing params")
 
 
+class TestTokens:
+    """Test token-related functions"""
+
+    @pytest.mark.asyncio
+    async def test_get_token_contract_by_symbol(self):
+        """Test getting token contract by symbol"""
+        result = await get_token_contract_by_symbol(TEST_TOKEN_SYMBOL)
+
+        if isinstance(result, str) and result.startswith("❌"):
+            pytest.skip("Network error or token symbol not found")
+
+        assert isinstance(result, dict), "Should return a dictionary"
+        assert "token_contracts" in result, "Should contain token_contracts"
+        assert "count" in result, "Should contain count"
+        assert isinstance(result["token_contracts"], list), "token_contracts should be a list"
+        assert isinstance(result["count"], int), "count should be an integer"
+
+        if result["count"] > 0:
+            print(f"✅ Found {result['count']} token(s) with symbol {TEST_TOKEN_SYMBOL}")
+        else:
+            print(f"✅ No tokens found with symbol {TEST_TOKEN_SYMBOL} (expected)")
+
+    @pytest.mark.asyncio
+    async def test_get_token_contract_by_symbol_empty(self):
+        """Test error handling for empty token symbol"""
+        result = await get_token_contract_by_symbol("")
+
+        assert isinstance(result, str), "Should return error string"
+        assert result.startswith("❌"), "Should be an error message"
+
+        print(f"✅ Correctly rejected empty token symbol")
+
+    @pytest.mark.asyncio
+    async def test_get_token_contract_by_symbol_nonexistent(self):
+        """Test getting token contract for non-existent symbol"""
+        result = await get_token_contract_by_symbol("NONEXISTENT_TOKEN_XYZ_123")
+
+        if isinstance(result, str) and result.startswith("❌"):
+            pytest.skip("Network error")
+
+        assert isinstance(result, dict), "Should return a dictionary"
+        assert result["count"] == 0, "Should find no tokens"
+        assert "message" in result, "Should contain message about no tokens found"
+
+        print(f"✅ Correctly returned empty list for non-existent token")
+
+    @pytest.mark.asyncio
+    async def test_get_token_data_by_contract(self):
+        """Test getting token data by contract"""
+        result = await get_token_data_by_contract(TEST_TOKEN_CONTRACT)
+
+        if isinstance(result, str) and result.startswith("❌"):
+            pytest.skip("Network error or token contract not found")
+
+        assert isinstance(result, dict), "Should return a dictionary"
+        # The structure depends on GraphQL response, just verify it's a dict
+
+        print(f"✅ Retrieved token data for contract {TEST_TOKEN_CONTRACT}")
+
+    @pytest.mark.asyncio
+    async def test_get_token_data_by_contract_empty(self):
+        """Test error handling for empty token contract"""
+        result = await get_token_data_by_contract("")
+
+        assert isinstance(result, str), "Should return error string"
+        assert result.startswith("❌"), "Should be an error message"
+
+        print(f"✅ Correctly rejected empty token contract")
+
+
+class TestDEX:
+    """Test DEX-related functions"""
+
+    @pytest.mark.asyncio
+    async def test_get_dex_price(self):
+        """Test getting DEX price for a token"""
+        result = await get_dex_price(TEST_DEX_TOKEN, TEST_DEX_BASE)
+
+        if isinstance(result, str) and result.startswith("❌"):
+            pytest.skip("Network error or DEX pair not found")
+
+        assert isinstance(result, dict), "Should return a dictionary"
+
+        # Check for either successful price retrieval or pair not found
+        if "error" in result:
+            assert "token" in result, "Should contain token"
+            assert "base" in result, "Should contain base"
+            print(f"✅ DEX pair not found (expected for test token)")
+        else:
+            assert "token" in result, "Should contain token"
+            assert "base" in result, "Should contain base"
+            assert "price" in result, "Should contain price"
+            assert "pair_id" in result, "Should contain pair_id"
+            assert isinstance(result["price"], (int, float)), "Price should be numeric"
+            print(f"✅ DEX price: {result['price']} {result['base']} per {result['token']}")
+
+    @pytest.mark.asyncio
+    async def test_get_dex_price_empty_token(self):
+        """Test error handling for empty token contract"""
+        result = await get_dex_price("")
+
+        assert isinstance(result, str), "Should return error string"
+        assert result.startswith("❌"), "Should be an error message"
+
+        print(f"✅ Correctly rejected empty token contract")
+
+    @pytest.mark.asyncio
+    async def test_buy_on_dex_missing_params(self):
+        """Test error handling for missing DEX buy parameters"""
+        result = await buy_on_dex()
+
+        assert isinstance(result, str), "Should return error string"
+        assert result.startswith("❌"), "Should be an error message"
+
+        print(f"✅ Correctly rejected DEX buy with missing params")
+
+    @pytest.mark.asyncio
+    async def test_buy_on_dex_invalid_amount(self):
+        """Test error handling for invalid amount in DEX buy"""
+        result = await buy_on_dex(
+            private_key=TEST_PRIVATE_KEY,
+            buy_token=TEST_DEX_TOKEN,
+            sell_token=TEST_DEX_BASE,
+            amount=0  # Invalid amount
+        )
+
+        assert isinstance(result, str), "Should return error string"
+        assert result.startswith("❌"), "Should be an error message"
+        assert "Amount must be positive" in result, "Should mention positive amount requirement"
+
+        print(f"✅ Correctly rejected DEX buy with zero amount")
+
+    @pytest.mark.asyncio
+    async def test_sell_on_dex_missing_params(self):
+        """Test error handling for missing DEX sell parameters"""
+        result = await sell_on_dex()
+
+        assert isinstance(result, str), "Should return error string"
+        assert result.startswith("❌"), "Should be an error message"
+
+        print(f"✅ Correctly rejected DEX sell with missing params")
+
+    @pytest.mark.asyncio
+    async def test_sell_on_dex_invalid_amount(self):
+        """Test error handling for invalid amount in DEX sell"""
+        result = await sell_on_dex(
+            private_key=TEST_PRIVATE_KEY,
+            sell_token=TEST_DEX_TOKEN,
+            buy_token=TEST_DEX_BASE,
+            amount=-1  # Invalid negative amount
+        )
+
+        assert isinstance(result, str), "Should return error string"
+        assert result.startswith("❌"), "Should be an error message"
+        assert "Amount must be positive" in result, "Should mention positive amount requirement"
+
+        print(f"✅ Correctly rejected DEX sell with negative amount")
+
+
 # ==========================================
 # RUN TESTS
 # ==========================================
@@ -375,6 +546,7 @@ def run_tests():
     print("\n" + "=" * 60)
     print("XIAN MCP SERVER TEST SUITE")
     print("=" * 60)
+    print(f"GraphQL URL: {os.environ['XIAN_GRAPHQL']}")
     print(f"Node URL: {os.environ['XIAN_NODE_URL']}")
     print(f"Chain ID: {os.environ['XIAN_CHAIN_ID']}")
     print("=" * 60 + "\n")
