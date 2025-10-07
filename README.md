@@ -1,6 +1,6 @@
 # Xian MCP Server
 
-A Model Context Protocol (MCP) server for interacting with the XIAN blockchain network. This server enables AI assistants to manage wallets, send transactions, deploy smart contracts, and interact with the XIAN blockchain.
+A Model Context Protocol (MCP) server for interacting with the XIAN blockchain network. This server enables AI assistants to manage wallets, send transactions, query smart contracts, and interact with the XIAN blockchain and DEX.
 
 ⚠️ **IMPORTANT**: This server handles private keys and is intended for LOCAL USE ONLY. Never expose this server to the internet or use it with production wallets.
 
@@ -9,10 +9,13 @@ A Model Context Protocol (MCP) server for interacting with the XIAN blockchain n
 - ✅ Create new wallets (standard and HD wallets)
 - ✅ Import wallets from private keys or mnemonics
 - ✅ Check balances (XIAN and custom tokens)
-- ✅ Send transactions
-- ✅ Deploy and interact with smart contracts
-- ✅ Sign and encrypt messages
+- ✅ Send transactions and tokens
+- ✅ Query and interact with smart contracts
+- ✅ Sign, verify, encrypt, and decrypt messages
 - ✅ Simulate transactions for gas estimation
+- ✅ Query token information by symbol or contract
+- ✅ Trade on the XIAN DEX (buy/sell tokens)
+- ✅ Get real-time DEX price data
 
 ## Prerequisites
 
@@ -81,7 +84,7 @@ python test_xian_server.py
 3. The tests use testnet by default (https://testnet.xian.org)
 
 #### What the tests cover:
-- ✅ Wallet creation and import)
+- ✅ Wallet creation and import
 - ✅ Balance and state queries
 - ✅ Transaction simulation and retrieval
 - ✅ Cryptographic operations - signing, encryption
@@ -212,6 +215,7 @@ The server supports these environment variables:
 
 - `XIAN_NODE_URL`: XIAN node URL (default: `https://node.xian.org`)
 - `XIAN_CHAIN_ID`: XIAN chain ID (default: `xian-1`)
+- `XIAN_GRAPHQL`: GraphQL endpoint URL (default: `https://node.xian.org/graphql`)
 
 #### Using Docker Compose with custom values
 
@@ -219,6 +223,7 @@ Create a `.env` file in the project directory (or copy and rename `.env.example`
 ```env
 XIAN_NODE_URL=https://node.xian.org
 XIAN_CHAIN_ID=xian-1
+XIAN_GRAPHQL=https://node.xian.org/graphql
 ```
 
 Then run:
@@ -238,6 +243,7 @@ To use custom values with Docker:
       "run", "-i", "--rm",
       "--env", "XIAN_NODE_URL=https://your-node.example.com",
       "--env", "XIAN_CHAIN_ID=testnet-1",
+      "--env", "XIAN_GRAPHQL=https://your-node.example.com/graphql",
       "xian-mcp-server"
     ]
   }
@@ -252,38 +258,88 @@ Once installed, you can interact with the XIAN blockchain through your AI assist
 - "Create a new XIAN wallet"
 - "Create an HD wallet with recovery phrase"
 - "Import wallet from private key [key]"
+- "Restore HD wallet from mnemonic: [12/24 word phrase]"
 
 ### Balance and Transactions
 - "Check balance for address 8bf21c7dc3a4ff32996bf56a665e1efe3c9261cc95bbf82552c328585c863829"
 - "Send 10 XIAN to [address] using private key [key]"
+- "Send 100 custom_token to [address] using private key [key]"
+- "Get transaction details for hash [tx_hash]"
 - "Simulate sending 100 tokens to estimate gas costs"
 
 ### Smart Contracts
-- "Deploy this contract: @export def hello(): return 'world'"
 - "Get the source code of contract 'currency'"
-- "Check the state of variable 'balances' in contract 'currency'"
+- "Check the state of variable 'balances:address123' in contract 'currency'"
+- "Read contract state: con_token.metadata:token_symbol"
+- "Simulate calling function 'transfer' on contract 'currency'"
+
+### Token Information
+- "Find the contract address for token symbol USDT"
+- "Get token metadata for contract con_my_token"
+- "What's the current DEX price of con_my_token in XIAN?"
+
+### DEX Trading
+- "Buy 100 con_my_token with currency (XIAN) using private key [key]"
+- "Sell 50 con_my_token for currency with 2% slippage"
+- "Get the current price of con_my_token against XIAN"
 
 ### Cryptographic Operations
 - "Sign the message 'Hello XIAN' with private key [key]"
+- "Verify signature [sig] for message 'Hello XIAN' from address [addr]"
 - "Encrypt a message from [sender_key] to [recipient_public_key]"
+- "Decrypt message [encrypted] from [sender_public_key] using [receiver_private_key]"
 
 ## Available Tools
 
-| Tool | Description | Requires Private Key |
-|------|-------------|---------------------|
-| `create_wallet` | Generate new wallet | No |
-| `create_wallet_from_private_key` | Import existing wallet | Yes (to import) |
-| `create_hd_wallet` | Create/restore HD wallet | No |
-| `get_balance` | Check address balance | No |
-| `send_transaction` | Send XIAN tokens | Yes |
-| `send_tokens` | Send custom tokens | Yes |
-| `submit_contract` | Deploy smart contract | Yes |
-| `get_state` | Read contract state | No |
-| `get_contract` | Get contract source | No |
-| `simulate_transaction` | Estimate gas costs | No |
-| `sign_message` | Sign a message | Yes |
-| `encrypt_message` | Encrypt between parties | Yes |
-| `decrypt_message` | Decrypt messages | Yes |
+### Wallet Management
+
+| Tool | Description | Parameters | Requires Private Key |
+|------|-------------|------------|---------------------|
+| `create_wallet` | Generate new random wallet | None | No |
+| `create_wallet_from_private_key` | Import wallet from private key | `private_key` | Yes (to import) |
+| `create_hd_wallet` | Create new HD wallet with mnemonic | None | No |
+| `create_hd_wallet_from_mnemonic` | Restore HD wallet from mnemonic | `mnemonic` | No |
+
+### Balance and Transactions
+
+| Tool | Description | Parameters | Requires Private Key |
+|------|-------------|------------|---------------------|
+| `get_balance` | Check address balance | `address`, `token_contract` | No |
+| `send_transaction` | Send generic transaction | `private_key`, `contract`, `function`, `kwargs` | Yes |
+| `send_tokens` | Send tokens to address | `private_key`, `to_address`, `token_contract`, `amount` | Yes |
+| `get_transaction` | Get transaction details | `tx_hash` | No |
+| `simulate_transaction` | Estimate gas costs | `address`, `contract`, `function`, `kwargs` | No |
+
+### Smart Contracts
+
+| Tool | Description | Parameters | Requires Private Key |
+|------|-------------|------------|---------------------|
+| `get_state` | Read contract state variable | `state_key` | No |
+| `get_contract` | Get contract source code | `contract_name` | No |
+
+### Token Information
+
+| Tool | Description | Parameters | Requires Private Key |
+|------|-------------|------------|---------------------|
+| `get_token_contract_by_symbol` | Find contract by token symbol | `token_symbol` | No |
+| `get_token_data_by_contract` | Get token metadata | `token_contract` | No |
+
+### DEX Operations
+
+| Tool | Description | Parameters | Requires Private Key |
+|------|-------------|------------|---------------------|
+| `buy_on_dex` | Buy tokens on DEX | `private_key`, `buy_token`, `sell_token`, `amount`, `slippage`, `deadline_min` | Yes |
+| `sell_on_dex` | Sell tokens on DEX | `private_key`, `sell_token`, `buy_token`, `amount`, `slippage`, `deadline_min` | Yes |
+| `get_dex_price` | Get token price on DEX | `token_contract`, `base_contract` | No |
+
+### Cryptographic Operations
+
+| Tool | Description | Parameters | Requires Private Key |
+|------|-------------|------------|---------------------|
+| `sign_message` | Sign a message | `private_key`, `message` | Yes |
+| `verify_signature` | Verify message signature | `address`, `message`, `signature` | No |
+| `encrypt_message` | Encrypt message between parties | `sender_private_key`, `receiver_public_key`, `message` | Yes |
+| `decrypt_message` | Decrypt received message | `receiver_private_key`, `sender_public_key`, `encrypted_message` | Yes |
 
 ## Troubleshooting
 
@@ -328,3 +384,12 @@ python xian_server.py
 - [Model Context Protocol](https://modelcontextprotocol.io)
 - [Claude Desktop MCP Guide](https://docs.anthropic.com/en/docs/mcp)
 - [LM Studio MCP Documentation](https://lmstudio.ai/docs/app/plugins/mcp)
+
+## Security Notice
+
+This server handles sensitive cryptographic material. Always:
+- Use only for local development and testing
+- Never expose to the internet
+- Keep private keys secure
+- Use testnet for experimentation
+- Verify all transactions before execution
