@@ -34,7 +34,6 @@ NODE_URL = os.environ.get("XIAN_NODE_URL", "https://node.xian.org")
 GRAPHQL = os.environ.get("XIAN_GRAPHQL", "https://node.xian.org/graphql")
 
 # TODO: Maybe I should switch from 'address' to 'public_key'?
-# TODO: Update CLAUDE.md & README.md & test_xian_server.py
 # TODO: Add docstrings
 
 # === MCP TOOLS ===
