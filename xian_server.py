@@ -623,6 +623,9 @@ async def get_dex_price(token_contract: str = "", base_contract: str = "currency
     try:
         pair_id = await get_state(f"con_pairs.toks_to_pair:{token_a}:{token_b}")
 
+        if isinstance(pair_id, str):
+            return pair_id
+
         if pair_id.get("state_value") is None:
             return {
                 "error": "Pair does not exist",
@@ -634,6 +637,11 @@ async def get_dex_price(token_contract: str = "", base_contract: str = "currency
 
         reserve0 = await get_state(f"con_pairs.pairs:{pair}:reserve0")
         reserve1 = await get_state(f"con_pairs.pairs:{pair}:reserve1")
+
+        if isinstance(reserve0, str):
+            return reserve0
+        if isinstance(reserve1, str):
+            return reserve1
 
         r0 = reserve0["state_value"]
         r1 = reserve1["state_value"]
@@ -925,7 +933,7 @@ TOOL_SPECS: List[dict[str, Any]] = [
                 "slippage": {"type": "number", "description": "Max slippage percentage", "default": 1.0},
                 "deadline_min": {"type": "number", "description": "Deadline in minutes", "default": 1.0},
             },
-            "required": ["private_key", "buy_token", "sell_token", "amount"],
+            "required": ["private_key", "buy_token", "amount"],
         },
         "handler": buy_on_dex,
     },
@@ -942,7 +950,7 @@ TOOL_SPECS: List[dict[str, Any]] = [
                 "slippage": {"type": "number", "description": "Max slippage percentage", "default": 1.0},
                 "deadline_min": {"type": "number", "description": "Deadline in minutes", "default": 1.0},
             },
-            "required": ["private_key", "sell_token", "buy_token", "amount"],
+            "required": ["private_key", "sell_token", "amount"],
         },
         "handler": sell_on_dex,
     },
@@ -1049,7 +1057,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return format_error_response(str(ex))
 
     if isinstance(result, str) and result.startswith("❌"):
-        return format_error_response(result[2:].strip())
+        return format_error_response(f"{name}: {result[2:].strip()}")
 
     return format_success_response(result)
 
