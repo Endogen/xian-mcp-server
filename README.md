@@ -202,6 +202,11 @@ cp custom_catalog.yaml ~/.docker/mcp/catalogs/custom.yaml
 }
 ```
 
+## MCP Details
+
+- Transport: stdio (`mcp.server`), serving `list_tools` and `call_tool` with `TextContent` JSON responses.
+- Tools include wallet/HD wallet, balances/transactions, contract state/source, token queries, DEX helpers, and crypto (sign/verify/encrypt/decrypt). Use `tools/list` (see `test_requests.jsonl`) to discover the full schema.
+
 3. Add to registry:
 ```bash
 echo 'registry:\n  xian:\n    ref: ""' >> ~/.docker/mcp/registry.yaml

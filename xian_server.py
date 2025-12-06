@@ -1,21 +1,34 @@
 #!/usr/bin/env python3
 """
-XIAN Network MCP Server - Interface with XIAN blockchain for wallet management and transactions
+XIAN Network MCP Server
+
+This server provides tools for interacting with the XIAN blockchain:
+wallet management, token operations, smart contract interactions, DEX
+trading helpers, and cryptographic operations.
+
+SECURITY WARNING: This server handles private keys and should only be used locally.
+Never expose this server to the internet or use it with production wallets.
 """
 
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
 import os
 import sys
-import json
-import aiohttp
-import logging
-
-from typing import Any
-from xian_py import XianAsync, Wallet
-from xian_py.wallet import HDWallet, verify_msg
-from xian_py.transaction import simulate_tx_async
-from xian_py.crypto import encrypt, decrypt_as_receiver
-from mcp.server.fastmcp import FastMCP
 from collections import defaultdict
+from decimal import Decimal
+from typing import Any, Awaitable, Callable, Dict, List
+
+import aiohttp
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import Tool, TextContent
+from xian_py import XianAsync, Wallet
+from xian_py.crypto import decrypt_as_receiver, encrypt
+from xian_py.transaction import simulate_tx_async
+from xian_py.wallet import HDWallet, verify_msg
 
 # Configure logging to stderr
 logging.basicConfig(
@@ -25,41 +38,63 @@ logging.basicConfig(
 )
 logger = logging.getLogger("xian-server")
 
-# Initialize MCP server
-mcp = FastMCP("xian")
-
 # Configuration
 CHAIN_ID = os.environ.get("XIAN_CHAIN_ID", "xian-1")
 NODE_URL = os.environ.get("XIAN_NODE_URL", "https://node.xian.org")
 GRAPHQL = os.environ.get("XIAN_GRAPHQL", "https://node.xian.org/graphql")
 
-# TODO: Maybe I should switch from 'address' to 'public_key'?
-# TODO: Add docstrings
+# === MCP APP INITIALIZATION ===
+app = Server("xian")
 
-# === MCP TOOLS ===
 
-@mcp.tool()
+# === HELPER: RESPONSE FORMATTING ===
+def _normalize_for_json(value: Any) -> Any:
+    """Coerce values into JSON-serializable forms."""
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
+def format_success_response(data: Any) -> List[TextContent]:
+    """
+    Wrap a successful result in MCP TextContent.
+    - Dict/list values are JSON-formatted for readability.
+    - Strings are passed through as-is.
+    """
+    if isinstance(data, str):
+        text = data
+    else:
+        try:
+            text = json.dumps(data, indent=2, default=_normalize_for_json)
+        except Exception:
+            text = str(data)
+
+    return [TextContent(type="text", text=text)]
+
+
+def format_error_response(error_msg: str) -> List[TextContent]:
+    """Wrap an error in MCP TextContent."""
+    return [TextContent(type="text", text=f"Error: {error_msg}")]
+
+
+# === CORE TOOLS (kept compatible with existing tests) ===
 async def create_wallet() -> dict[str, str] | str:
     """Create a new XIAN wallet with a random seed."""
-
     logger.info("Creating new wallet")
 
     try:
         wallet = Wallet()
-
         return {
             "public_key": wallet.public_key,
             "private_key": wallet.private_key,
         }
     except Exception as ex:
-        logger.error(f"Error creating wallet: {ex}")
+        logger.error("Error creating wallet: %s", ex)
         return f"❌ Error creating wallet: {str(ex)}"
 
 
-@mcp.tool()
 async def create_wallet_from_private_key(private_key: str = "") -> dict[str, str] | str:
     """Create a wallet from an existing private key."""
-
     if not private_key.strip():
         return "❌ Error: Private key is required"
 
@@ -67,30 +102,23 @@ async def create_wallet_from_private_key(private_key: str = "") -> dict[str, str
 
     try:
         wallet = Wallet(private_key.strip())
-
         return {
             "public_key": wallet.public_key,
-            "private_key": wallet.private_key
+            "private_key": wallet.private_key,
         }
     except Exception as ex:
-        logger.error(f"Error creating wallet from private key: {ex}")
+        logger.error("Error creating wallet from private key: %s", ex)
         return f"❌ Error creating wallet from private key: {str(ex)}"
 
 
-# TODO: How to best include the 'derivation_path'? Add argument?
-@mcp.tool()
 async def create_hd_wallet() -> dict[str, str] | str:
-    """Create a new HD wallet"""
-
+    """Create a new HD wallet."""
     logger.info("Creating new HD wallet")
 
     try:
-        # Create new HD wallet
         hd_wallet = HDWallet()
+        logger.info("Created new HD wallet")
 
-        logger.info("Created new HD wallet ")
-
-        # Get first derived wallet
         path = [44, 0, 0, 0, 0]  # m/44'/0'/0'/0'/0'
         xian_wallet = hd_wallet.get_wallet(path)
         eth_wallet = hd_wallet.get_ethereum_wallet(0)
@@ -101,28 +129,24 @@ async def create_hd_wallet() -> dict[str, str] | str:
             "xian_public_key": xian_wallet.public_key,
             "xian_private_key": xian_wallet.private_key,
             "eth_public_key": eth_wallet.public_key,
-            "eth_private_key": eth_wallet.private_key
+            "eth_private_key": eth_wallet.private_key,
         }
     except Exception as ex:
-        logger.error(f"Error creating HD wallet: {ex}")
+        logger.error("Error creating HD wallet: %s", ex)
         return f"❌ Error creating HD wallet: {str(ex)}"
 
 
-@mcp.tool()
 async def create_hd_wallet_from_mnemonic(mnemonic: str = "") -> dict[str, str] | str:
-    """Restore an HD wallet from mnemonic phrase"""
-
+    """Restore an HD wallet from mnemonic phrase."""
     if not mnemonic.strip():
         return "❌ Error: Mnemonic is required"
 
     logger.info("Creating HD wallet from mnemonic")
 
     try:
-        # Restore from mnemonic
         hd_wallet = HDWallet(mnemonic.strip())
         logger.info("Created HD wallet from mnemonic")
 
-        # Get first derived wallet
         path = [44, 0, 0, 0, 0]  # m/44'/0'/0'/0'/0'
         xian_wallet = hd_wallet.get_wallet(path)
         eth_wallet = hd_wallet.get_ethereum_wallet(0)
@@ -133,73 +157,69 @@ async def create_hd_wallet_from_mnemonic(mnemonic: str = "") -> dict[str, str] |
             "xian_public_key": xian_wallet.public_key,
             "xian_private_key": xian_wallet.private_key,
             "eth_public_key": eth_wallet.public_key,
-            "eth_private_key": eth_wallet.private_key
+            "eth_private_key": eth_wallet.private_key,
         }
     except Exception as ex:
-        logger.error(f"Error creating HD wallet: {ex}")
+        logger.error("Error creating HD wallet: %s", ex)
         return f"❌ Error creating HD wallet: {str(ex)}"
 
 
-@mcp.tool()
 async def get_balance(address: str = "", token_contract: str = "currency") -> dict[str, Any] | str:
     """Get balance for an address, optionally for a specific token contract."""
-
     if not address.strip():
         return "❌ Error: Address is required"
 
-    logger.info(f"Getting balance for {address}")
+    logger.info("Getting balance for %s", address)
 
     try:
-        async with XianAsync(NODE_URL) as xian:
+        async with XianAsync(NODE_URL, chain_id=CHAIN_ID) as xian:
             balance = await xian.get_balance(address.strip(), contract=token_contract.strip())
             balance = 0 if balance is None else balance
 
             return {
                 "address": address.strip(),
                 "token_contract": token_contract.strip(),
-                "balance": balance
+                "balance": balance,
             }
     except Exception as ex:
-        logger.error(f"Error getting balance: {ex}")
+        logger.error("Error getting balance: %s", ex)
         return f"❌ Error getting balance: {str(ex)}"
 
 
-@mcp.tool()
 async def send_transaction(
-        private_key: str = "",
-        contract: str = "",
-        function: str = "",
-        kwargs = None) -> dict[str, str] | str:
+    private_key: str = "",
+    contract: str = "",
+    function: str = "",
+    kwargs: dict[str, Any] | None = None,
+) -> dict[str, str] | str:
     """Send a transaction to the Xian Network."""
-
     if not private_key.strip():
         return "❌ Error: Private key is required"
     if not contract.strip():
-        return "❌ Error: Private key is required"
+        return "❌ Error: Contract name is required"
     if not function.strip():
-        return "❌ Error: Private key is required"
+        return "❌ Error: Function name is required"
     if kwargs is None:
         kwargs = {}
 
-    logger.info(f"Sending transaction")
+    logger.info("Sending transaction %s.%s", contract, function)
 
     try:
         wallet = Wallet(private_key.strip())
-        async with XianAsync(NODE_URL, wallet=wallet) as xian:
+        async with XianAsync(NODE_URL, wallet=wallet, chain_id=CHAIN_ID) as xian:
             return await xian.send_tx(contract, function, kwargs)
     except Exception as ex:
-        logger.error(f"Error sending transaction: {ex}")
+        logger.error("Error sending transaction: %s", ex)
         return f"❌ Error sending transaction: {str(ex)}"
 
 
-@mcp.tool()
 async def send_tokens(
-        private_key: str = "",
-        to_address: str = "",
-        token_contract: str = "",
-        amount: float = 0) -> dict[str, str] | str:
+    private_key: str = "",
+    to_address: str = "",
+    token_contract: str = "",
+    amount: float = 0,
+) -> dict[str, str] | str:
     """Send tokens from a specific token contract to another address."""
-
     if not private_key.strip():
         return "❌ Error: Private key is required"
     if not token_contract.strip():
@@ -209,40 +229,36 @@ async def send_tokens(
     if amount <= 0:
         return "❌ Error: Amount is required"
 
-    logger.info(f"Sending {amount} {token_contract} tokens to {to_address}")
+    logger.info("Sending %s %s tokens to %s", amount, token_contract, to_address)
 
     try:
         wallet = Wallet(private_key.strip())
-        async with XianAsync(NODE_URL, wallet=wallet) as xian:
+        async with XianAsync(NODE_URL, wallet=wallet, chain_id=CHAIN_ID) as xian:
             return await xian.send(amount, to_address, token_contract)
     except Exception as ex:
-        logger.error(f"Error sending tokens: {ex}")
+        logger.error("Error sending tokens: %s", ex)
         return f"❌ Error sending tokens: {str(ex)}"
 
 
-@mcp.tool()
 async def get_transaction(tx_hash: str = "") -> dict[str, Any] | str:
     """Retrieve transaction from a transaction hash."""
-
     if not tx_hash.strip():
         return "❌ Error: Transaction hash is required"
 
     try:
-        async with XianAsync(NODE_URL) as xian:
+        async with XianAsync(NODE_URL, chain_id=CHAIN_ID) as xian:
             return await xian.get_tx(tx_hash)
     except Exception as ex:
-        logger.error(f"Error retrieving transaction: {ex}")
+        logger.error("Error retrieving transaction: %s", ex)
         return f"❌ Error retrieving transaction: {str(ex)}"
 
 
-@mcp.tool()
 async def get_state(state_key: str) -> dict[str, Any] | str:
     """Get state from a contract variable."""
-
     if not state_key.strip():
         return "❌ Error: State key is required"
 
-    logger.info(f"Getting state for key {state_key}")
+    logger.info("Getting state for key %s", state_key)
 
     contract, _, rest = state_key.strip().partition(".")
     parts = rest.split(":")
@@ -250,7 +266,7 @@ async def get_state(state_key: str) -> dict[str, Any] | str:
     keys = tuple(parts[1:]) if len(parts) > 1 else None
 
     try:
-        async with XianAsync(NODE_URL) as xian:
+        async with XianAsync(NODE_URL, chain_id=CHAIN_ID) as xian:
             if keys:
                 state = await xian.get_state(contract, variable, *keys)
             else:
@@ -263,71 +279,66 @@ async def get_state(state_key: str) -> dict[str, Any] | str:
 
             return {
                 "state_key": state_str,
-                "state_value": state
+                "state_value": state,
             }
     except Exception as ex:
-        logger.error(f"Error getting state: {ex}")
+        logger.error("Error getting state: %s", ex)
         return f"❌ Error getting state: {str(ex)}"
 
 
-@mcp.tool()
 async def get_contract(contract_name: str = "") -> dict[str, str] | str:
     """Get and decompile contract source code."""
-
     if not contract_name.strip():
         return "❌ Error: Contract name is required"
 
-    logger.info(f"Getting contract {contract_name}")
+    logger.info("Getting contract %s", contract_name)
 
     try:
-        async with XianAsync(NODE_URL) as xian:
+        async with XianAsync(NODE_URL, chain_id=CHAIN_ID) as xian:
             source = await xian.get_contract(contract_name.strip(), clean=True)
             return {
                 "contract_name": contract_name.strip(),
-                "source": source
+                "source": source,
             }
     except Exception as ex:
-        logger.error(f"Error getting contract: {ex}")
+        logger.error("Error getting contract: %s", ex)
         return f"❌ Error getting contract: {str(ex)}"
 
 
-@mcp.tool()
 async def simulate_transaction(
-        address: str = "",
-        contract: str = "",
-        function: str = "",
-        kwargs = None) -> dict | str:
+    address: str = "",
+    contract: str = "",
+    function: str = "",
+    kwargs: dict[str, Any] | None = None,
+) -> dict[str, Any] | str:
     """Simulate a transaction to estimate stamps or execute read-only functions."""
-
     if not address.strip():
         return "❌ Error: Private key is required"
     if not contract.strip():
-        return "❌ Error: Private key is required"
+        return "❌ Error: Contract name is required"
     if not function.strip():
-        return "❌ Error: Private key is required"
+        return "❌ Error: Function name is required"
     if kwargs is None:
         kwargs = {}
 
-    logger.info(f"Simulating {contract}.{function}")
+    logger.info("Simulating %s.%s", contract, function)
 
     try:
         payload = {
             "contract": contract,
             "function": function,
             "kwargs": kwargs,
-            "sender": address
+            "sender": address,
         }
 
         return await simulate_tx_async(NODE_URL, payload)
     except Exception as ex:
-        logger.error(f"Error simulating transaction: {ex}")
+        logger.error("Error simulating transaction: %s", ex)
         return f"❌ Error simulating transaction: {str(ex)}"
 
 
-@mcp.tool()
 async def sign_message(private_key: str = "", message: str = "") -> dict[str, str] | str:
     """Sign a message with a wallet's private key."""
-
     if not private_key.strip():
         return "❌ Error: Private key is required"
     if not message.strip():
@@ -340,17 +351,15 @@ async def sign_message(private_key: str = "", message: str = "") -> dict[str, st
         signature = wallet.sign_msg(message.strip())
 
         return {
-            "signature": signature
+            "signature": signature,
         }
     except Exception as ex:
-        logger.error(f"Error signing message: {ex}")
+        logger.error("Error signing message: %s", ex)
         return f"❌ Error signing message: {str(ex)}"
 
 
-@mcp.tool()
 async def verify_signature(address: str = "", message: str = "", signature: str = "") -> bool | str:
     """Verify a signature for a message."""
-
     if not address.strip():
         return "❌ Error: Address is required"
     if not message.strip():
@@ -363,17 +372,16 @@ async def verify_signature(address: str = "", message: str = "", signature: str 
     try:
         return verify_msg(address, message, signature)
     except Exception as ex:
-        logger.error(f"Error verifying signature: {ex}")
+        logger.error("Error verifying signature: %s", ex)
         return f"❌ Error verifying signature: {str(ex)}"
 
 
-@mcp.tool()
 async def encrypt_message(
-        sender_private_key: str = "",
-        receiver_public_key: str = "",
-        message: str = "") -> dict[str, str] | str:
+    sender_private_key: str = "",
+    receiver_public_key: str = "",
+    message: str = "",
+) -> dict[str, str] | str:
     """Encrypt a message between sender and receiver."""
-
     if not sender_private_key.strip():
         return "❌ Error: Sender private key is required"
     if not receiver_public_key.strip():
@@ -386,30 +394,28 @@ async def encrypt_message(
     try:
         sender_wallet = Wallet(sender_private_key.strip())
 
-        # Encrypt the message
         encrypted = encrypt(
             sender_private_key.strip(),
             receiver_public_key.strip(),
-            message.strip()
+            message.strip(),
         )
 
         return {
             "sender_public_key": sender_wallet.public_key.strip(),
             "receiver_public_key": receiver_public_key.strip(),
-            "encrypted_message": encrypted
+            "encrypted_message": encrypted,
         }
     except Exception as ex:
-        logger.error(f"Error encrypting message: {ex}")
+        logger.error("Error encrypting message: %s", ex)
         return f"❌ Error encrypting message: {str(ex)}"
 
 
-@mcp.tool()
 async def decrypt_message(
-        receiver_private_key: str = "",
-        sender_public_key: str = "",
-        encrypted_message: str = "") -> dict[str, str] | str:
+    receiver_private_key: str = "",
+    sender_public_key: str = "",
+    encrypted_message: str = "",
+) -> dict[str, str] | str:
     """Decrypt a message as either sender or receiver."""
-
     if not receiver_private_key.strip():
         return "❌ Error: Private key is required"
     if not sender_public_key.strip():
@@ -417,43 +423,38 @@ async def decrypt_message(
     if not encrypted_message.strip():
         return "❌ Error: Encrypted message is required"
 
-    logger.info(f"Decrypting message")
+    logger.info("Decrypting message")
 
     try:
-        # Validate private key
         receiver_wallet = Wallet(receiver_private_key.strip())
 
-        # Decrypt based on role
         decrypted = decrypt_as_receiver(
             sender_public_key.strip(),
             receiver_private_key.strip(),
-            encrypted_message.strip()
+            encrypted_message.strip(),
         )
 
         return {
             "receiver_public_key": receiver_wallet.public_key.strip(),
             "sender_public_key": sender_public_key.strip(),
-            "decrypted_message": decrypted
+            "decrypted_message": decrypted,
         }
     except Exception as ex:
-        logger.error(f"Error decrypting message: {ex}")
+        logger.error("Error decrypting message: %s", ex)
         return f"❌ Error decrypting message: {str(ex)}"
 
 
-@mcp.tool()
-async def get_token_contract_by_symbol(token_symbol: str = "") -> dict | str:
+async def get_token_contract_by_symbol(token_symbol: str = "") -> dict[str, Any] | str:
     """Get token contract by symbol."""
-
     if not token_symbol.strip():
         return "❌ Error: Token symbol is required"
 
     try:
         tokens = await get_tokens()
 
-        # Group contracts by symbol
         symbols = defaultdict(list)
         for tkn in tokens:
-            symbols[tkn['token_symbol']].append(tkn['token_contract'])
+            symbols[tkn["token_symbol"]].append(tkn["token_contract"])
 
         contracts = symbols.get(token_symbol.strip().upper(), [])
 
@@ -461,28 +462,25 @@ async def get_token_contract_by_symbol(token_symbol: str = "") -> dict | str:
             return {
                 "token_contracts": [],
                 "count": 0,
-                "message": "No token found with this symbol"
+                "message": "No token found with this symbol",
             }
-        elif len(contracts) == 1:
+        if len(contracts) == 1:
             return {
                 "token_contracts": contracts,
-                "count": 1
+                "count": 1,
             }
-        else:
-            return {
-                "token_contracts": contracts,
-                "count": len(contracts),
-                "message": "Multiple tokens found with this symbol"
-            }
+        return {
+            "token_contracts": contracts,
+            "count": len(contracts),
+            "message": "Multiple tokens found with this symbol",
+        }
     except Exception as ex:
-        logger.error(f"Error getting token contract: {ex}")
+        logger.error("Error getting token contract: %s", ex)
         return f"❌ Error getting token contract: {str(ex)}"
 
 
-@mcp.tool()
-async def get_token_data_by_contract(token_contract: str = "") -> dict | str:
+async def get_token_data_by_contract(token_contract: str = "") -> dict[str, Any] | str:
     """Get token data by contract."""
-
     if not token_contract.strip():
         return "❌ Error: Token contract is required"
 
@@ -490,10 +488,10 @@ async def get_token_data_by_contract(token_contract: str = "") -> dict | str:
 
     query = """
     query GetTokenDetails(
-      $operator: String!, 
-      $logoUrl: String!, 
-      $name: String!, 
-      $symbol: String!, 
+      $operator: String!,
+      $logoUrl: String!,
+      $name: String!,
+      $symbol: String!,
       $website: String!) {
       tokenStates: allStates(
         filter: {
@@ -523,26 +521,25 @@ async def get_token_data_by_contract(token_contract: str = "") -> dict | str:
                 "logoUrl": f"{contract}.metadata:token_logo_url",
                 "name": f"{contract}.metadata:token_name",
                 "symbol": f"{contract}.metadata:token_symbol",
-                "website": f"{contract}.metadata:token_website"
-            }
+                "website": f"{contract}.metadata:token_website",
+            },
         )
         return data
 
     except Exception as ex:
-        logger.error(f"Error getting token data: {ex}")
+        logger.error("Error getting token data: %s", ex)
         return f"❌ Error getting token data: {str(ex)}"
 
 
-@mcp.tool()
 async def buy_on_dex(
-        private_key: str = "",
-        buy_token: str = "",
-        sell_token: str = "",
-        amount: float = 0,
-        slippage: float = 1.0,
-        deadline_min: float = 1.0) -> dict | str:
+    private_key: str = "",
+    buy_token: str = "",
+    sell_token: str = "",
+    amount: float = 0,
+    slippage: float = 1.0,
+    deadline_min: float = 1.0,
+) -> dict[str, Any] | str:
     """Buy tokens on the DEX."""
-
     if not private_key.strip():
         return "❌ Error: Private key is required"
     if not buy_token.strip():
@@ -552,7 +549,7 @@ async def buy_on_dex(
     if amount <= 0:
         return "❌ Error: Amount must be positive"
 
-    logger.info(f"Buying {amount} {buy_token} with {sell_token}")
+    logger.info("Buying %s %s with %s", amount, buy_token, sell_token)
 
     try:
         return await send_transaction(
@@ -564,24 +561,23 @@ async def buy_on_dex(
                 "sell_token": sell_token.strip(),
                 "amount": amount,
                 "slippage": slippage,
-                "deadline_min": deadline_min
-            }
+                "deadline_min": deadline_min,
+            },
         )
     except Exception as ex:
-        logger.error(f"Error buying on DEX: {ex}")
+        logger.error("Error buying on DEX: %s", ex)
         return f"❌ Error buying on DEX: {str(ex)}"
 
 
-@mcp.tool()
 async def sell_on_dex(
-        private_key: str = "",
-        sell_token: str = "",
-        buy_token: str = "",
-        amount: float = 0,
-        slippage: float = 1.0,
-        deadline_min: float = 1.0) -> dict | str:
+    private_key: str = "",
+    sell_token: str = "",
+    buy_token: str = "",
+    amount: float = 0,
+    slippage: float = 1.0,
+    deadline_min: float = 1.0,
+) -> dict[str, Any] | str:
     """Sell tokens on the DEX."""
-
     if amount != round(amount, 8):
         amount *= 0.9999
 
@@ -594,7 +590,7 @@ async def sell_on_dex(
     if amount <= 0:
         return "❌ Error: Amount must be positive"
 
-    logger.info(f"Selling {amount} {sell_token} for {buy_token}")
+    logger.info("Selling %s %s for %s", amount, sell_token, buy_token)
 
     try:
         return await send_transaction(
@@ -606,48 +602,50 @@ async def sell_on_dex(
                 "buy_token": buy_token.strip(),
                 "amount": amount,
                 "slippage": slippage,
-                "deadline_min": deadline_min
-            }
+                "deadline_min": deadline_min,
+            },
         )
     except Exception as ex:
-        logger.error(f"Error selling on DEX: {ex}")
+        logger.error("Error selling on DEX: %s", ex)
         return f"❌ Error selling on DEX: {str(ex)}"
 
 
-@mcp.tool()
-async def get_dex_price(token_contract: str = "", base_contract: str = "currency") -> dict | str:
+async def get_dex_price(token_contract: str = "", base_contract: str = "currency") -> dict[str, Any] | str:
     """Get DEX price for a token against a base currency."""
-
     if not token_contract.strip():
         return "❌ Error: Token contract is required"
 
     token = token_contract.strip()
     base = base_contract.strip()
 
-    # Order tokens alphabetically (DEX convention)
     token_a, token_b = (token, base) if token < base else (base, token)
 
     try:
-        # Get pair ID
         pair_id = await get_state(f"con_pairs.toks_to_pair:{token_a}:{token_b}")
 
-        if pair_id.get('state_value') is None:
+        if isinstance(pair_id, str):
+            return pair_id
+
+        if pair_id.get("state_value") is None:
             return {
                 "error": "Pair does not exist",
                 "token": token,
-                "base": base
+                "base": base,
             }
 
-        pair = pair_id['state_value']
+        pair = pair_id["state_value"]
 
-        # Get reserves
         reserve0 = await get_state(f"con_pairs.pairs:{pair}:reserve0")
         reserve1 = await get_state(f"con_pairs.pairs:{pair}:reserve1")
 
-        r0 = reserve0['state_value']
-        r1 = reserve1['state_value']
+        if isinstance(reserve0, str):
+            return reserve0
+        if isinstance(reserve1, str):
+            return reserve1
 
-        # Calculate price based on token order
+        r0 = reserve0["state_value"]
+        r1 = reserve1["state_value"]
+
         if token_a == token:
             price = r1 / r0 if r0 > 0 else 0
         else:
@@ -659,19 +657,17 @@ async def get_dex_price(token_contract: str = "", base_contract: str = "currency
             "price": price,
             "pair_id": pair,
             "reserve_token": r0 if token_a == token else r1,
-            "reserve_base": r1 if token_a == token else r0
+            "reserve_base": r1 if token_a == token else r0,
         }
 
     except Exception as ex:
-        logger.error(f"Error getting DEX price: {ex}")
+        logger.error("Error getting DEX price: %s", ex)
         return f"❌ Error getting DEX price: {str(ex)}"
 
 
-# === HELPER FUNCTIONS ===
-
+# === SUPPORTING HELPERS ===
 async def get_tokens() -> list[dict]:
     """Get all tokens with their contract name and symbol."""
-
     query = """
     query GetTokenContractsWithSymbols {
       tokenSymbols: allStates(
@@ -698,99 +694,388 @@ async def get_tokens() -> list[dict]:
     try:
         data = await fetch_graphql(query=query)
 
-        # Get set of valid contract names
-        valid_contracts = {
-            node['name']
-            for node in data['tokenContracts']['nodes']
-        }
+        valid_contracts = {node["name"] for node in data["tokenContracts"]["nodes"]}
 
-        # Parse and filter tokens
-        tokens = []
-        for node in data['tokenSymbols']['nodes']:
-            contract = node['key'].split('.metadata:token_symbol')[0]
+        tokens: list[dict[str, str]] = []
+        for node in data["tokenSymbols"]["nodes"]:
+            contract = node["key"].split(".metadata:token_symbol")[0]
             if contract in valid_contracts:
-                tokens.append({
-                    'token_contract': contract.lower(),
-                    'token_symbol': node['value'].upper()
-                })
+                tokens.append(
+                    {
+                        "token_contract": contract.lower(),
+                        "token_symbol": node["value"].upper(),
+                    }
+                )
 
         return tokens
 
     except Exception as ex:
-        logger.error(f"Error getting tokens: {ex}")
+        logger.error("Error getting tokens: %s", ex)
         raise
 
 
 async def fetch_graphql(
-        query: str,
-        variables: dict = None,
-        endpoint: str = None,
-        headers: dict = None,
-        timeout: float = 5.0) -> dict:
+    query: str,
+    variables: dict | None = None,
+    endpoint: str | None = None,
+    headers: dict | None = None,
+    timeout: float = 5.0,
+) -> dict:
     """
     Execute a GraphQL query and return the results.
-
-    Args:
-        query: The GraphQL query string
-        variables: Optional variables for the query
-        endpoint: GraphQL endpoint URL (defaults to configured endpoint)
-        headers: Optional additional headers
-        timeout: Request timeout in seconds
-
-    Returns:
-        Dict containing the GraphQL response data
-
-    Raises:
-        Exception: When the query fails
     """
-
     variables = variables or {}
     endpoint = endpoint or GRAPHQL
 
-    default_headers = {'Content-Type': 'application/json'}
+    default_headers = {"Content-Type": "application/json"}
     if headers:
         default_headers.update(headers)
 
-    payload = {
-        'query': query,
-        'variables': variables
-    }
+    payload = {"query": query, "variables": variables}
 
     async with aiohttp.ClientSession() as session:
         try:
             async with session.post(
-                    endpoint,
-                    json=payload,
-                    headers=default_headers,
-                    timeout=aiohttp.ClientTimeout(total=timeout)
+                endpoint,
+                json=payload,
+                headers=default_headers,
+                timeout=aiohttp.ClientTimeout(total=timeout),
             ) as response:
                 response.raise_for_status()
                 result = await response.json()
 
-                if 'errors' in result:
-                    error_msg = ', '.join(ex.get('message', str(e)) for ex in result['errors'])
+                if "errors" in result:
+                    error_msg = ", ".join(err.get("message", str(err)) for err in result["errors"])
                     raise Exception(f"GraphQL errors: {error_msg}")
 
-                return result.get('data', {})
+                return result.get("data", {})
 
         except aiohttp.ClientError as ex:
-            logger.error(f"HTTP error fetching GraphQL: {ex}")
+            logger.error("HTTP error fetching GraphQL: %s", ex)
             raise Exception(f"Failed to fetch GraphQL: {str(ex)}")
         except Exception as ex:
-            logger.error(f"Error fetching GraphQL: {ex}")
+            logger.error("Error fetching GraphQL: %s", ex)
             raise
 
 
-# === SERVER STARTUP ===
+# === MCP TOOL REGISTRATION ===
+ToolHandler = Callable[..., Awaitable[Any]]
 
-if __name__ == "__main__":
-    logger.info("Starting XIAN Network MCP server...")
-    logger.info(f"Chain ID: {CHAIN_ID}")
-    logger.info(f"Node URL: {NODE_URL}")
-    logger.info(f"GraphQL : {GRAPHQL}")
+TOOL_SPECS: List[dict[str, Any]] = [
+    {
+        "name": "create_wallet",
+        "description": "Create a new random XIAN wallet with public/private key pair",
+        "schema": {"type": "object", "properties": {}, "required": []},
+        "handler": create_wallet,
+    },
+    {
+        "name": "create_wallet_from_private_key",
+        "description": "Import a wallet from an existing private key",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "private_key": {"type": "string", "description": "The private key (64 hex characters)"},
+            },
+            "required": ["private_key"],
+        },
+        "handler": create_wallet_from_private_key,
+    },
+    {
+        "name": "create_hd_wallet",
+        "description": "Create a new HD (Hierarchical Deterministic) wallet with a 12-word mnemonic phrase",
+        "schema": {"type": "object", "properties": {}, "required": []},
+        "handler": create_hd_wallet,
+    },
+    {
+        "name": "create_hd_wallet_from_mnemonic",
+        "description": "Restore an HD wallet from a mnemonic phrase (12 or 24 words)",
+        "schema": {
+            "type": "object",
+            "properties": {"mnemonic": {"type": "string", "description": "Mnemonic phrase (space separated)"}},
+            "required": ["mnemonic"],
+        },
+        "handler": create_hd_wallet_from_mnemonic,
+    },
+    {
+        "name": "get_balance",
+        "description": "Check the balance of a XIAN address for a specific token",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "address": {"type": "string", "description": "The XIAN address to check (64 hex characters)"},
+                "token_contract": {
+                    "type": "string",
+                    "description": "The token contract name (default: 'currency')",
+                    "default": "currency",
+                },
+            },
+            "required": ["address"],
+        },
+        "handler": get_balance,
+    },
+    {
+        "name": "send_transaction",
+        "description": "Send a transaction to execute a smart contract function",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "private_key": {"type": "string", "description": "Private key of the sender"},
+                "contract": {"type": "string", "description": "Contract name to call"},
+                "function": {"type": "string", "description": "Function name to execute"},
+                "kwargs": {
+                    "type": "object",
+                    "description": "Function arguments as key-value pairs",
+                    "default": {},
+                },
+            },
+            "required": ["private_key", "contract", "function"],
+        },
+        "handler": send_transaction,
+    },
+    {
+        "name": "send_tokens",
+        "description": "Send tokens from one address to another",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "private_key": {"type": "string", "description": "Private key of the sender"},
+                "to_address": {"type": "string", "description": "Recipient address"},
+                "token_contract": {
+                    "type": "string",
+                    "description": "Token contract name (default: 'currency')",
+                    "default": "currency",
+                },
+                "amount": {"type": "number", "description": "Amount of tokens to send"},
+            },
+            "required": ["private_key", "to_address", "amount"],
+        },
+        "handler": send_tokens,
+    },
+    {
+        "name": "get_transaction",
+        "description": "Get details of a transaction by its hash",
+        "schema": {
+            "type": "object",
+            "properties": {"tx_hash": {"type": "string", "description": "Transaction hash"}},
+            "required": ["tx_hash"],
+        },
+        "handler": get_transaction,
+    },
+    {
+        "name": "simulate_transaction",
+        "description": "Simulate a transaction to estimate stamps without executing it",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "address": {"type": "string", "description": "Sender address for simulation"},
+                "contract": {"type": "string", "description": "Contract name"},
+                "function": {"type": "string", "description": "Function name"},
+                "kwargs": {"type": "object", "description": "Function arguments", "default": {}},
+            },
+            "required": ["address", "contract", "function"],
+        },
+        "handler": simulate_transaction,
+    },
+    {
+        "name": "get_state",
+        "description": "Read a state variable from a smart contract",
+        "schema": {
+            "type": "object",
+            "properties": {"state_key": {"type": "string", "description": "State key 'contract.variable:key'"}},
+            "required": ["state_key"],
+        },
+        "handler": get_state,
+    },
+    {
+        "name": "get_contract",
+        "description": "Get the source code of a smart contract",
+        "schema": {
+            "type": "object",
+            "properties": {"contract_name": {"type": "string", "description": "Name of the contract"}},
+            "required": ["contract_name"],
+        },
+        "handler": get_contract,
+    },
+    {
+        "name": "get_token_contract_by_symbol",
+        "description": "Find the contract address for a token by its symbol",
+        "schema": {
+            "type": "object",
+            "properties": {"token_symbol": {"type": "string", "description": "Token symbol (e.g., 'XIAN')"}},
+            "required": ["token_symbol"],
+        },
+        "handler": get_token_contract_by_symbol,
+    },
+    {
+        "name": "get_token_data_by_contract",
+        "description": "Get metadata for a token by its contract address",
+        "schema": {
+            "type": "object",
+            "properties": {"token_contract": {"type": "string", "description": "Token contract name"}},
+            "required": ["token_contract"],
+        },
+        "handler": get_token_data_by_contract,
+    },
+    {
+        "name": "buy_on_dex",
+        "description": "Buy tokens on the XIAN DEX",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "private_key": {"type": "string", "description": "Private key for signing the transaction"},
+                "buy_token": {"type": "string", "description": "Token contract to buy"},
+                "sell_token": {
+                    "type": "string",
+                    "description": "Token contract to sell",
+                    "default": "currency",
+                },
+                "amount": {"type": "number", "description": "Amount of sell_token to spend"},
+                "slippage": {"type": "number", "description": "Max slippage percentage", "default": 1.0},
+                "deadline_min": {"type": "number", "description": "Deadline in minutes", "default": 1.0},
+            },
+            "required": ["private_key", "buy_token", "amount"],
+        },
+        "handler": buy_on_dex,
+    },
+    {
+        "name": "sell_on_dex",
+        "description": "Sell tokens on the XIAN DEX",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "private_key": {"type": "string", "description": "Private key for signing the transaction"},
+                "sell_token": {"type": "string", "description": "Token contract to sell"},
+                "buy_token": {"type": "string", "description": "Token contract to receive", "default": "currency"},
+                "amount": {"type": "number", "description": "Amount of sell_token to sell"},
+                "slippage": {"type": "number", "description": "Max slippage percentage", "default": 1.0},
+                "deadline_min": {"type": "number", "description": "Deadline in minutes", "default": 1.0},
+            },
+            "required": ["private_key", "sell_token", "amount"],
+        },
+        "handler": sell_on_dex,
+    },
+    {
+        "name": "get_dex_price",
+        "description": "Get the current price of a token on the DEX",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "token_contract": {"type": "string", "description": "Token contract to get price for"},
+                "base_contract": {
+                    "type": "string",
+                    "description": "Base token to price against (default: 'currency')",
+                    "default": "currency",
+                },
+            },
+            "required": ["token_contract"],
+        },
+        "handler": get_dex_price,
+    },
+    {
+        "name": "sign_message",
+        "description": "Sign a message with a private key",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "private_key": {"type": "string", "description": "Private key to sign with"},
+                "message": {"type": "string", "description": "Message to sign"},
+            },
+            "required": ["private_key", "message"],
+        },
+        "handler": sign_message,
+    },
+    {
+        "name": "verify_signature",
+        "description": "Verify a message signature",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "address": {"type": "string", "description": "Address that allegedly signed the message"},
+                "message": {"type": "string", "description": "Original message"},
+                "signature": {"type": "string", "description": "Signature to verify"},
+            },
+            "required": ["address", "message", "signature"],
+        },
+        "handler": verify_signature,
+    },
+    {
+        "name": "encrypt_message",
+        "description": "Encrypt a message from one party to another",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "sender_private_key": {"type": "string", "description": "Sender's private key"},
+                "receiver_public_key": {"type": "string", "description": "Receiver's public key"},
+                "message": {"type": "string", "description": "Message to encrypt"},
+            },
+            "required": ["sender_private_key", "receiver_public_key", "message"],
+        },
+        "handler": encrypt_message,
+    },
+    {
+        "name": "decrypt_message",
+        "description": "Decrypt a received encrypted message",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "receiver_private_key": {"type": "string", "description": "Receiver's private key"},
+                "sender_public_key": {"type": "string", "description": "Sender's public key"},
+                "encrypted_message": {"type": "string", "description": "Encrypted message to decrypt"},
+            },
+            "required": ["receiver_private_key", "sender_public_key", "encrypted_message"],
+        },
+        "handler": decrypt_message,
+    },
+]
+
+TOOL_REGISTRY: Dict[str, ToolHandler] = {spec["name"]: spec["handler"] for spec in TOOL_SPECS}
+
+
+@app.list_tools()
+async def list_tools() -> list[Tool]:
+    """List all available tools for MCP clients."""
+    return [
+        Tool(name=spec["name"], description=spec["description"], inputSchema=spec["schema"])
+        for spec in TOOL_SPECS
+    ]
+
+
+@app.call_tool()
+async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+    """Handle tool execution via MCP."""
+    handler = TOOL_REGISTRY.get(name)
+    if handler is None:
+        return format_error_response(f"Unknown tool: {name}")
 
     try:
-        mcp.run(transport="stdio")
-    except Exception as e:
-        logger.error(f"Server error: {e}", exc_info=True)
-        sys.exit(1)
+        result = await handler(**arguments)
+    except TypeError as ex:
+        logger.error("Invalid arguments for %s: %s", name, ex)
+        return format_error_response(f"Invalid arguments for {name}: {ex}")
+    except Exception as ex:
+        logger.error("Error executing tool %s: %s", name, ex, exc_info=True)
+        return format_error_response(str(ex))
+
+    if isinstance(result, str) and result.startswith("❌"):
+        return format_error_response(f"{name}: {result[2:].strip()}")
+
+    return format_success_response(result)
+
+
+# === SERVER STARTUP ===
+async def main() -> None:
+    logger.info("Starting XIAN Network MCP server...")
+    logger.info("Chain ID: %s", CHAIN_ID)
+    logger.info("Node URL: %s", NODE_URL)
+    logger.info("GraphQL : %s", GRAPHQL)
+
+    async with stdio_server() as (read_stream, write_stream):
+        await app.run(
+            read_stream,
+            write_stream,
+            app.create_initialization_options(),
+        )
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
